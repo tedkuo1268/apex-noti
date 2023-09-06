@@ -19,23 +19,6 @@ type Notification interface {
 	pushMessage(msg string)
 }
 
-type LiveUpdateNotification struct {
-	Title     string
-	CurrRound int
-	FirstExec bool
-	Channel   chan<- string
-	OldMapPtr *map[int]map[string]MatchData
-	NewMapPtr *map[int]map[string]MatchData
-}
-
-type UserUpdateNotification struct {
-	Title           string
-	Token           string
-	CurrRound       int
-	Channel         chan<- webhook.WebhookPayload
-	MatchDataMapPtr *map[int]map[string]MatchData
-}
-
 func PushNotificationMessage(n Notification) {
 	fmt.Println("Sending notification...")
 	msg := n.createMessage()
@@ -43,38 +26,13 @@ func PushNotificationMessage(n Notification) {
 	n.pushMessage(msg)
 }
 
-func (s *UserUpdateNotification) createMessage() string {
-	roundMap := (*s.MatchDataMapPtr)[s.CurrRound]
-	var msg strings.Builder
-
-	ksArr := make([]KeyStanding, 0, len(roundMap))
-	for k, _ := range roundMap {
-		ks := KeyStanding{key: k, standing: roundMap[k].standing}
-		ksArr = append(ksArr, ks)
-	}
-
-	// Sort kps by the descending order of total points
-	sort.Slice(ksArr, func(i, j int) bool {
-		return ksArr[i].standing < ksArr[j].standing
-	})
-
-	// Iterate through the map by the descending order of total points
-	for i, kp := range ksArr {
-		k := kp.key
-		v := roundMap[k] // MatchData struct
-
-		msg.WriteString(fmt.Sprintf(" %d. %s: %d |", i+1, k, v.totalPoints))
-	}
-
-	return msg.String()
-}
-
-func (s *UserUpdateNotification) pushMessage(msg string) {
-	msgPayload := webhook.WebhookPayload{
-		Token: s.Token,
-		Text:  msg,
-	}
-	s.Channel <- msgPayload
+type LiveUpdateNotification struct {
+	Title     string
+	CurrRound int
+	FirstExec bool
+	Channel   chan<- string
+	OldMapPtr *map[int]map[string]MatchData
+	NewMapPtr *map[int]map[string]MatchData
 }
 
 func (s *LiveUpdateNotification) createMessage() string {
@@ -196,6 +154,75 @@ func (s *LiveUpdateNotification) pushMessage(msg string) {
 	if len(msg) > 0 {
 		s.Channel <- msg
 	}
+}
+
+type UserCommandNow struct {
+	Title           string
+	Token           string
+	CurrRound       int
+	Channel         chan<- webhook.WebhookPayload
+	MatchDataMapPtr *map[int]map[string]MatchData
+}
+
+func (s *UserCommandNow) createMessage() string {
+	roundMap := (*s.MatchDataMapPtr)[s.CurrRound]
+	var msg strings.Builder
+
+	ksArr := make([]KeyStanding, 0, len(roundMap))
+	for k, _ := range roundMap {
+		ks := KeyStanding{key: k, standing: roundMap[k].standing}
+		ksArr = append(ksArr, ks)
+	}
+
+	// Sort kps by the descending order of total points
+	sort.Slice(ksArr, func(i, j int) bool {
+		return ksArr[i].standing < ksArr[j].standing
+	})
+
+	// Iterate through the map by the descending order of total points
+	for i, kp := range ksArr {
+		k := kp.key
+		v := roundMap[k] // MatchData struct
+
+		msg.WriteString(fmt.Sprintf(" %d. %s: %d |", i+1, k, v.totalPoints))
+	}
+
+	return msg.String()
+}
+
+func (s *UserCommandNow) pushMessage(msg string) {
+	msgPayload := webhook.WebhookPayload{
+		Token: s.Token,
+		Text:  msg,
+	}
+	s.Channel <- msgPayload
+}
+
+type UserCommandGroupStanding struct {
+	Title         string
+	Token         string
+	Channel       chan<- webhook.WebhookPayload
+	GroupStanding *GroupStageStandings
+}
+
+func (u *UserCommandGroupStanding) createMessage() string {
+	var msg strings.Builder
+
+	msg.WriteString(fmt.Sprintf(" %s: ", u.Title))
+
+	for _, ts := range u.GroupStanding.Standings {
+		msg.WriteString(fmt.Sprintf(" %d. %s: %d |", ts.Standing, ts.TeamName, ts.TotalPoints))
+	}
+
+	return msg.String()
+}
+
+func (u *UserCommandGroupStanding) pushMessage(msg string) {
+	msgPayload := webhook.WebhookPayload{
+		Token: u.Token,
+		Text:  msg,
+	}
+	u.Channel <- msgPayload
 }
 
 // TODO: update check should be implemented in another function.

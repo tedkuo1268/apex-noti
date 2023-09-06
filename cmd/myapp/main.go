@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"apex_tournament_noti/internal/linebot/routes"
@@ -87,22 +88,32 @@ func main() {
 			fmt.Printf("Webhook msgPayload Token: %v\n", msgPayload.Token)
 			fmt.Printf("Webhook msgPayload Text: %v\n", msgPayload.Text)
 
-			switch msgPayload.Text {
+			command := strings.ToLower(strings.Trim(msgPayload.Text, " "))
+			fmt.Printf("Command: %v\n", command)
+			switch command {
 			case "/help":
 				text := "Commands:\n" +
-					"/update: Show standings and scores of the current series\n"
+					"/now: Show the standings and scores of current series\n" +
+					"/groupstanding: Show the group stage team scores and standings\n"
 				responsePayload := webhook.WebhookPayload{
 					Token: msgPayload.Token,
 					Text:  text,
 				}
 				responseChannel <- responsePayload
-			case "/update":
+			case "/now":
 				url := "https://liquipedia.net/apexlegends/Apex_Legends_Global_Series/2023/Championship/Group_Stage"
 				title := "Championship Group Stage"
 				MatchDataMap := make(map[int]map[string]webscraper.MatchData)
 				currRound := webscraper.GetMatchData(url, &MatchDataMap)
-				liveNoti := webscraper.UserUpdateNotification{Title: title, Token: msgPayload.Token, CurrRound: currRound, Channel: responseChannel, MatchDataMapPtr: &MatchDataMap}
-				webscraper.PushNotificationMessage(&liveNoti)
+				userNoti := webscraper.UserCommandNow{Title: title, Token: msgPayload.Token, CurrRound: currRound, Channel: responseChannel, MatchDataMapPtr: &MatchDataMap}
+				webscraper.PushNotificationMessage(&userNoti)
+			case "/groupstanding":
+				url := "https://liquipedia.net/apexlegends/Apex_Legends_Global_Series/2023/Championship/Group_Stage"
+				title := "Championship Group Stage"
+				groupStageStandings := webscraper.GroupStageStandings{}
+				groupStageStandings.GetData(url)
+				userNoti := webscraper.UserCommandGroupStanding{Title: title, Token: msgPayload.Token, Channel: responseChannel, GroupStanding: &groupStageStandings}
+				webscraper.PushNotificationMessage(&userNoti)
 			}
 		}
 	}()
