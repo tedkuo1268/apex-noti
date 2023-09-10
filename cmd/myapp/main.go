@@ -9,6 +9,7 @@ import (
 
 	"apex_tournament_noti/internal/linebot/routes"
 	"apex_tournament_noti/internal/linebot/webhook"
+	"apex_tournament_noti/internal/notification"
 	"apex_tournament_noti/internal/webscraper"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +26,6 @@ type Payload struct {
 }
 
 func main() {
-	fmt.Println("123")
 	// Create a channel for notification
 	broadcastChannel := make(chan string)
 	webhookChannel := make(chan webhook.WebhookPayload, 100)
@@ -43,23 +43,23 @@ func main() {
 		firstExec := true
 		url := "https://liquipedia.net/apexlegends/Apex_Legends_Global_Series/2023/Championship/Group_Stage"
 
-		// Create a nested map
-		MatchDataMap := make(map[int]map[string]webscraper.MatchData)
-
-		// Create a nested map to temporarily store the old team data
-		oldMatchDataMap := make(map[int]map[string]webscraper.MatchData)
+		currStageMatchData := webscraper.StageMatchData{Data: &[]map[string]webscraper.MatchData{}, CurrRound: 0}
+		fmt.Printf("currStageMatchData: %v\n", currStageMatchData)
 
 		for {
 			title := "Championship Group Stage"
 
-			// Deep copy the team data map for checking update
-			for k, v := range MatchDataMap {
-				oldMatchDataMap[k] = v
+			prevStageMatchData := webscraper.StageMatchData{Data: &[]map[string]webscraper.MatchData{}, CurrRound: 0}
+			if len(*currStageMatchData.Data) != 0 {
+				prevStageMatchData.CurrRound = currStageMatchData.CurrRound
+				for _, v := range *currStageMatchData.Data {
+					prevStageMatchData.AddMatchDataMap(v)
+				}
 			}
 
-			currRound := webscraper.GetMatchData(url, &MatchDataMap)
-			liveNoti := webscraper.LiveUpdateNotification{Title: title, CurrRound: currRound, FirstExec: firstExec, Channel: broadcastChannel, OldMapPtr: &oldMatchDataMap, NewMapPtr: &MatchDataMap}
-			webscraper.PushNotificationMessage(&liveNoti)
+			webscraper.Scrape(&currStageMatchData, url)
+			liveNoti := notification.LiveUpdateNotification{Title: title, FirstExec: firstExec, Channel: broadcastChannel, PrevStageMatchData: prevStageMatchData, CurrStageMatchData: currStageMatchData}
+			notification.PushNotificationMessage(&liveNoti)
 
 			time.Sleep(10 * time.Second)
 
@@ -77,7 +77,7 @@ func main() {
 
 			message := linebot.NewTextMessage(msg)
 			if _, err := bot.BroadcastMessage(message).Do(); err != nil {
-				log.Fatalf("Error: %s", err)
+				log.Printf("Error: %s", err)
 			}
 		}
 	}()
@@ -92,28 +92,34 @@ func main() {
 			fmt.Printf("Command: %v\n", command)
 			switch command {
 			case "/help":
-				text := "Commands:\n" +
-					"/now: Show the standings and scores of current series\n" +
-					"/groupstanding: Show the group stage team scores and standings\n"
-				responsePayload := webhook.WebhookPayload{
-					Token: msgPayload.Token,
-					Text:  text,
-				}
-				responseChannel <- responsePayload
-			case "/now":
-				url := "https://liquipedia.net/apexlegends/Apex_Legends_Global_Series/2023/Championship/Group_Stage"
-				title := "Championship Group Stage"
-				MatchDataMap := make(map[int]map[string]webscraper.MatchData)
-				currRound := webscraper.GetMatchData(url, &MatchDataMap)
-				userNoti := webscraper.UserCommandNow{Title: title, Token: msgPayload.Token, CurrRound: currRound, Channel: responseChannel, MatchDataMapPtr: &MatchDataMap}
-				webscraper.PushNotificationMessage(&userNoti)
-			case "/groupstanding":
-				url := "https://liquipedia.net/apexlegends/Apex_Legends_Global_Series/2023/Championship/Group_Stage"
-				title := "Championship Group Stage"
-				groupStageStandings := webscraper.GroupStageStandings{}
-				groupStageStandings.GetData(url)
-				userNoti := webscraper.UserCommandGroupStanding{Title: title, Token: msgPayload.Token, Channel: responseChannel, GroupStanding: &groupStageStandings}
-				webscraper.PushNotificationMessage(&userNoti)
+				go func() {
+					text := "Commands:\n" +
+						"!now: Show the standings and scores of current series\n" +
+						"!gs: Show the group stage team scores and standings\n"
+					responsePayload := webhook.WebhookPayload{
+						Token: msgPayload.Token,
+						Text:  text,
+					}
+					responseChannel <- responsePayload
+				}()
+			case "!now":
+				go func() {
+					url := "https://liquipedia.net/apexlegends/Apex_Legends_Global_Series/2023/Championship/Group_Stage"
+					title := "Championship Group Stage"
+					currStageMatchData := webscraper.StageMatchData{}
+					webscraper.Scrape(&currStageMatchData, url)
+					userNoti := notification.UserCommandNow{Title: title, Token: msgPayload.Token, Channel: responseChannel, StageMatchData: &currStageMatchData}
+					notification.PushNotificationMessage(&userNoti)
+				}()
+			case "!gs":
+				go func() {
+					url := "https://liquipedia.net/apexlegends/Apex_Legends_Global_Series/2023/Championship/Group_Stage"
+					title := "Championship Group Stage"
+					groupStageStandings := webscraper.GroupStageStandings{}
+					webscraper.Scrape(&groupStageStandings, url)
+					userNoti := notification.UserCommandGroupStanding{Title: title, Token: msgPayload.Token, Channel: responseChannel, GroupStanding: &groupStageStandings}
+					notification.PushNotificationMessage(&userNoti)
+				}()
 			}
 		}
 	}()
